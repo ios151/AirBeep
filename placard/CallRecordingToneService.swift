@@ -17,7 +17,7 @@ enum CallRecordingToneError: LocalizedError {
         case .unsupported:
             String(localized: "This device or system version is not supported.")
         case .pairingRequired:
-            String(localized: "Pair this iPhone and connect LocalDevVPN before changing recording tones.")
+            String(localized: "BadQuery is unavailable on this system. Connect LocalDevVPN to use the Airlift fallback.")
         case .airliftUnavailable:
             String(localized: "This build is missing AirLift file access support.")
         case .airliftFailed(let reason):
@@ -194,23 +194,24 @@ final class CallRecordingToneService: ObservableObject {
         lastError = error.localizedDescription
     }
 
+    // BadQuery 优先：iOS 26+ 均可直接访问系统文件，无需 LocalDevVPN 或代理工具。
+    // 仅在 BadQuery 不可用时才降级到 Airlift（需要 LocalDevVPN）。
     private func accessBackend() throws -> AccessBackend {
         guard SystemCompatibility.isSupported else {
             throw CallRecordingToneError.unsupported
         }
 
-        let majorVersion = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
-        if majorVersion >= 27 || !BadQuery.isAvailable {
-            let pairingPath = PairingController.pairingFilePath()
-            let attributes = try? FileManager.default.attributesOfItem(atPath: pairingPath)
-            let size = attributes?[.size] as? Int ?? 0
-            guard size > 0 else {
-                throw CallRecordingToneError.pairingRequired
-            }
-            return .airlift(pairingPath: pairingPath)
+        if BadQuery.isAvailable {
+            return .badQuery
         }
 
-        return .badQuery
+        let pairingPath = PairingController.pairingFilePath()
+        let attributes = try? FileManager.default.attributesOfItem(atPath: pairingPath)
+        let size = attributes?[.size] as? Int ?? 0
+        guard size > 0 else {
+            throw CallRecordingToneError.pairingRequired
+        }
+        return .airlift(pairingPath: pairingPath)
     }
 
     private func shouldOfferAirliftSetup(for error: Error) -> Bool {
@@ -219,8 +220,7 @@ final class CallRecordingToneService: ObservableObject {
         case .pairingRequired, .airliftUnavailable, .airliftFailed:
             return true
         case .toneReadFailed:
-            return ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27
-                || !BadQuery.isAvailable
+            return !BadQuery.isAvailable
         case .unsupported, .missingTone, .missingBackup, .invalidToneBundle, .verificationFailed:
             return false
         }
