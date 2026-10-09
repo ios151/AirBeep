@@ -27,7 +27,7 @@ struct AirliftWiFiCheckingView: View {
         VStack(spacing: 16) {
             Spacer()
             ProgressView().controlSize(.large)
-            Text("Checking Wi-Fi...").font(.headline).foregroundStyle(.secondary)
+            Text("正在检查 Wi-Fi...").font(.headline).foregroundStyle(.secondary)
             Spacer()
         }
         .padding(24)
@@ -39,10 +39,10 @@ struct AirliftWiFiRequiredView: View {
         VStack(alignment: .leading, spacing: 20) {
             Spacer()
             Image(systemName: "wifi.exclamationmark").font(.system(size: 44)).foregroundStyle(.tint)
-            Text("Wi-Fi Required").font(.largeTitle.bold())
-            Text("Airlift requires an active Wi-Fi connection for the initial pairing step.")
+            Text("需要 Wi-Fi").font(.largeTitle.bold())
+            Text("Airlift 初始配对需要 Wi-Fi 连接。")
                 .foregroundStyle(.secondary)
-            Text("Connect this iPhone to a Wi-Fi network to continue. Placard will continue automatically once Wi-Fi is available.")
+            Text("请将 iPhone 连接到 Wi-Fi 网络，连接后 AirBeep 将自动继续。")
                 .foregroundStyle(.secondary)
             Spacer()
         }
@@ -60,15 +60,15 @@ struct AirliftPairingView: View {
         VStack(alignment: .leading, spacing: 20) {
             Spacer()
             Image(systemName: "iphone.gen3.radiowaves.left.and.right").font(.system(size: 44)).foregroundStyle(.tint)
-            Text("Pair this iPhone").font(.largeTitle.bold())
-            Text("Start pairing, then open Settings > Privacy & Security > Developer Mode > Pair with AirBeep.")
+            Text("配对 iPhone").font(.largeTitle.bold())
+            Text("点击「开始配对」，然后打开 设置 > 隐私与安全性 > 开发者模式 > 与 AirBeep 配对。")
                 .foregroundStyle(.secondary)
             if let pin { Text(pin).font(.largeTitle.monospacedDigit()) }
             if let error { Text(error).foregroundStyle(.red) }
             Spacer()
             Button(action: onStart) {
-                if running { ProgressView("Waiting for pairing...").frame(maxWidth: .infinity) }
-                else { Text("Start pairing").frame(maxWidth: .infinity) }
+                if running { ProgressView("等待配对...").frame(maxWidth: .infinity) }
+                else { Text("开始配对").frame(maxWidth: .infinity) }
             }
             .buttonStyle(.borderedProminent).controlSize(.large).disabled(running)
         }
@@ -76,10 +76,9 @@ struct AirliftPairingView: View {
     }
 }
 
-// Tunnel-source-aware VPN connection step.
-// Both LocalDevVPN and proxy tools provide the same 10.7.0.1 loopback;
-// AirliftFFI discovers the device via its pairing UDID, so the code path
-// is identical for both -- this view provides user guidance only.
+// 支持 LocalDevVPN 和代理工具两种隧道来源。
+// AirliftFFI 通过 pairing file 的 UDID 自动发现设备地址，
+// 两种回环方式在代码层无差异，此视图只提供用户引导。
 struct AirliftVPNView: View {
     @Binding var tunnelSource: TunnelSource
     let connectionError: String?
@@ -91,9 +90,9 @@ struct AirliftVPNView: View {
         VStack(alignment: .leading, spacing: 20) {
             Spacer()
             Image(systemName: "network").font(.system(size: 44)).foregroundStyle(.tint)
-            Text("Connect Tunnel").font(.largeTitle.bold())
+            Text("连接隧道").font(.largeTitle.bold())
 
-            Picker("Tunnel Source", selection: $tunnelSource) {
+            Picker("隧道来源", selection: $tunnelSource) {
                 ForEach(TunnelSource.allCases) { Text($0.displayName).tag($0) }
             }
             .pickerStyle(.segmented)
@@ -101,18 +100,18 @@ struct AirliftVPNView: View {
             Text(tunnelSource.connectInstructions).foregroundStyle(.secondary)
 
             if tunnelSource == .localDevVPN {
-                Button("Open LocalDevVPN", action: openLocalDevVPN)
+                Button("打开 LocalDevVPN", action: openLocalDevVPN)
                     .buttonStyle(.bordered).controlSize(.large)
             }
 
             if let connectionError {
                 Text(connectionError).foregroundStyle(.red)
-                Button("Pair again", action: onPairAgain).font(.footnote)
+                Button("重新配对", action: onPairAgain).font(.footnote)
             }
             Spacer()
             Button(action: onCheck) {
-                if checking { ProgressView("Checking connection...").frame(maxWidth: .infinity) }
-                else { Text("Check and enter").frame(maxWidth: .infinity) }
+                if checking { ProgressView("正在检查连接...").frame(maxWidth: .infinity) }
+                else { Text("检查并进入").frame(maxWidth: .infinity) }
             }
             .buttonStyle(.borderedProminent).controlSize(.large).disabled(checking)
         }
@@ -129,9 +128,9 @@ struct AirliftVPNView: View {
     }
 }
 
-#Preview("Wi-Fi Required") { AirliftWiFiRequiredView() }
-#Preview("Pairing")        { AirliftPairingView(running: false, pin: nil, error: nil, onStart: {}) }
-#Preview("Tunnel") {
+#Preview("需要 Wi-Fi")  { AirliftWiFiRequiredView() }
+#Preview("配对")        { AirliftPairingView(running: false, pin: nil, error: nil, onStart: {}) }
+#Preview("连接隧道") {
     @Previewable @State var src = TunnelSource.localDevVPN
     AirliftVPNView(tunnelSource: $src, connectionError: nil, checking: false, onCheck: {}, onPairAgain: {})
 }

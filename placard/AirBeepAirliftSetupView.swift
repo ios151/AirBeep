@@ -2,9 +2,8 @@ import Combine
 import Network
 import SwiftUI
 
-/// Completes the two prerequisites used by the Airlift backend:
-/// an on-device pairing record and an active loopback tunnel
-/// (LocalDevVPN or a proxy tool providing 10.7.0.1 reflection).
+/// 完成 Airlift 后端所需的两个前提条件：
+/// 设备配对记录 + 活跃的回环隧道（LocalDevVPN 或代理工具）。
 struct AirBeepAirliftSetupView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var pairing = PairingController.shared
@@ -23,7 +22,7 @@ struct AirBeepAirliftSetupView: View {
         NavigationStack {
             Group {
                 switch wifiMonitor.status {
-                case .checking:    AirliftWiFiCheckingView()
+                case .checking:     AirliftWiFiCheckingView()
                 case .disconnected: AirliftWiFiRequiredView()
                 case .connected:
                     if connected {
@@ -50,11 +49,11 @@ struct AirBeepAirliftSetupView: View {
                     }
                 }
             }
-            .navigationTitle("Airlift Setup")
+            .navigationTitle("Airlift 设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { pairing.softCancel(); dismiss() }
+                    Button("取消") { pairing.softCancel(); dismiss() }
                 }
             }
         }
@@ -66,12 +65,12 @@ struct AirBeepAirliftSetupView: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 54, weight: .semibold))
                 .foregroundStyle(.green)
-            Text("Airlift Ready").font(.largeTitle.bold())
-            Text("Pairing and \(service.tunnelSource.displayName) are ready. Return to AirBeep to read or change the recording tones.")
+            Text("Airlift 已就绪").font(.largeTitle.bold())
+            Text("配对与 \(service.tunnelSource.displayName) 均已就绪，返回 AirBeep 即可读取或更改录音提示音。")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             Spacer()
-            Button("Done") { dismiss() }
+            Button("完成") { dismiss() }
                 .buttonStyle(.borderedProminent).controlSize(.large).frame(maxWidth: .infinity)
         }
         .padding(24)

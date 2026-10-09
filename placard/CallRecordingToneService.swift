@@ -1,7 +1,7 @@
 import Combine
 import Foundation
 
-// Loopback tunnel provider used by the Airlift fallback path.
+// 回环隧道来源
 enum TunnelSource: String, CaseIterable, Identifiable {
     case localDevVPN = "LocalDevVPN"
     case proxyTool   = "proxy"
@@ -11,16 +11,16 @@ enum TunnelSource: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .localDevVPN: "LocalDevVPN"
-        case .proxyTool:   String(localized: "Proxy Tool")
+        case .proxyTool:   "代理工具"
         }
     }
 
     var connectInstructions: String {
         switch self {
         case .localDevVPN:
-            String(localized: "Open LocalDevVPN, tap Connect, then return to AirBeep.")
+            "打开 LocalDevVPN，点击连接，然后返回 AirBeep。"
         case .proxyTool:
-            String(localized: "Enable loopback reflection in your proxy tool (e.g. ClashMi loopback-address: 10.7.0.1 / Surge tun-included-routes), then return to AirBeep.")
+            "在代理工具中启用回环反射（如 ClashMi loopback-address: 10.7.0.1 / Surge tun-included-routes），然后返回 AirBeep。"
         }
     }
 }
@@ -39,24 +39,45 @@ enum CallRecordingToneError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unsupported:
-            String(localized: "This device or system version is not supported.")
+            "此设备或系统版本不受支持。"
         case .pairingRequired:
-            String(localized: "BadQuery is unavailable. Enable a loopback tunnel (LocalDevVPN or proxy) and complete Airlift setup.")
+            "BadQuery 不可用，请启用回环隧道（LocalDevVPN 或代理工具）并完成 Airlift 设置。"
         case .airliftUnavailable:
-            String(localized: "This build is missing AirLift file access support.")
+            "此构建缺少 AirLift 文件访问支持。"
         case .airliftFailed(let reason):
-            String(format: String(localized: "AirLift operation failed: %@"), reason)
+            "AirLift 操作失败：\(Self.localizeAirliftReason(reason))"
         case .toneReadFailed(let name, let reason):
-            String(format: String(localized: "Could not read %@: %@"), name, reason)
+            "无法读取 \(name)：\(Self.localizeAirliftReason(reason))"
         case .missingTone(let name):
-            String(format: String(localized: "Missing system tone: %@"), name)
+            "系统提示音文件缺失：\(name)"
         case .missingBackup:
-            String(localized: "No original tone backup is available.")
+            "原始提示音备份不存在，无法恢复。"
         case .invalidToneBundle:
-            String(localized: "The bundled silent tones are missing.")
+            "静音资源文件缺失，请重新安装。"
         case .verificationFailed(let name):
-            String(format: String(localized: "Could not verify %@ after writing."), name)
+            "写入后校验失败：\(name)。请重新连接隧道后重试。"
         }
+    }
+
+    // 将 AirliftFFI 常见英文错误映射为中文
+    static func localizeAirliftReason(_ reason: String) -> String {
+        let r = reason
+        if r.contains("timed out") || r.contains("RemoteXPC") || r.contains("connection failed") {
+            return "连接超时。请确认 LocalDevVPN 或代理回环已激活，再点击「检查并进入」。"
+        }
+        if r.contains("did not recover") || r.contains("AirTraffic") || r.contains("moved copy remains") {
+            return "文件写入后系统未能恢复，请重新连接隧道后重试。若反复失败，点击「重新配对」重新完成设置。"
+        }
+        if r.contains("permission") || r.contains("denied") || r.contains("sandbox") {
+            return "权限被拒，请确认已完成配对并连接回环隧道。"
+        }
+        if r.contains("pairing") || r.contains("pair") {
+            return "配对失败，请重新配对。"
+        }
+        if r.contains("not found") || r.contains("missing") {
+            return "文件未找到，请确认设备已配对且系统文件完整。"
+        }
+        return reason
     }
 }
 
@@ -77,7 +98,6 @@ final class CallRecordingToneService: ObservableObject {
     @Published private(set) var statusDetail: String?
     @Published private(set) var needsAirliftSetup = false
 
-    // Airlift fallback tunnel source, persisted to UserDefaults.
     @Published var tunnelSource: TunnelSource = {
         let raw = UserDefaults.standard.string(forKey: "airliftTunnelSource") ?? ""
         return TunnelSource(rawValue: raw) ?? .localDevVPN
@@ -129,9 +149,7 @@ final class CallRecordingToneService: ObservableObject {
         do {
             let backend = try accessBackend()
             mode = try await inspectMode(using: backend)
-            statusDetail = nil
-            needsAirliftSetup = false
-            lastError = nil
+            statusDetail = nil; needsAirliftSetup = false; lastError = nil
         } catch {
             mode = .unavailable
             statusDetail = error.localizedDescription
@@ -197,8 +215,8 @@ final class CallRecordingToneService: ObservableObject {
         lastError = error.localizedDescription
     }
 
-    // BadQuery first: works on iOS 26+/27 without any VPN or proxy.
-    // Fall back to Airlift (loopback tunnel required) only when BadQuery is unavailable.
+    // BadQuery 优先（iOS 26+/27），不需要任何 VPN 或代理。
+    // BadQuery 不可用时才降级到 Airlift（需要回环隧道）。
     private func accessBackend() throws -> AccessBackend {
         guard SystemCompatibility.isSupported else {
             throw CallRecordingToneError.unsupported
