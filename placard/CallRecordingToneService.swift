@@ -1,6 +1,30 @@
 import Combine
 import Foundation
 
+// Loopback tunnel provider used by the Airlift fallback path.
+enum TunnelSource: String, CaseIterable, Identifiable {
+    case localDevVPN = "LocalDevVPN"
+    case proxyTool   = "proxy"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .localDevVPN: "LocalDevVPN"
+        case .proxyTool:   String(localized: "Proxy Tool")
+        }
+    }
+
+    var connectInstructions: String {
+        switch self {
+        case .localDevVPN:
+            String(localized: "Open LocalDevVPN, tap Connect, then return to AirBeep.")
+        case .proxyTool:
+            String(localized: "Enable loopback reflection in your proxy tool (e.g. ClashMi loopback-address: 10.7.0.1 / Surge tun-included-routes), then return to AirBeep.")
+        }
+    }
+}
+
 enum CallRecordingToneError: LocalizedError {
     case unsupported
     case pairingRequired
@@ -17,7 +41,7 @@ enum CallRecordingToneError: LocalizedError {
         case .unsupported:
             String(localized: "This device or system version is not supported.")
         case .pairingRequired:
-            String(localized: "BadQuery is unavailable on this system. Connect LocalDevVPN to use the Airlift fallback.")
+            String(localized: "BadQuery is unavailable. Enable a loopback tunnel (LocalDevVPN or proxy) and complete Airlift setup.")
         case .airliftUnavailable:
             String(localized: "This build is missing AirLift file access support.")
         case .airliftFailed(let reason):
@@ -52,6 +76,14 @@ final class CallRecordingToneService: ObservableObject {
     @Published private(set) var lastError: String?
     @Published private(set) var statusDetail: String?
     @Published private(set) var needsAirliftSetup = false
+
+    // Airlift fallback tunnel source, persisted to UserDefaults.
+    @Published var tunnelSource: TunnelSource = {
+        let raw = UserDefaults.standard.string(forKey: "airliftTunnelSource") ?? ""
+        return TunnelSource(rawValue: raw) ?? .localDevVPN
+    }() {
+        didSet { UserDefaults.standard.set(tunnelSource.rawValue, forKey: "airliftTunnelSource") }
+    }
 
     private enum AccessBackend {
         case badQuery
@@ -94,7 +126,6 @@ final class CallRecordingToneService: ObservableObject {
         guard !isBusy else { return }
         isBusy = true
         defer { isBusy = false }
-
         do {
             let backend = try accessBackend()
             mode = try await inspectMode(using: backend)
@@ -105,86 +136,58 @@ final class CallRecordingToneService: ObservableObject {
             mode = .unavailable
             statusDetail = error.localizedDescription
             needsAirliftSetup = shouldOfferAirliftSetup(for: error)
-            // Initial inspection must not pop an alert when setup is incomplete.
             lastError = nil
         }
     }
 
-    func clearError() {
-        lastError = nil
-    }
+    func clearError() { lastError = nil }
 
     func applySilentTone() async {
         guard !isBusy else { return }
         isBusy = true
         defer { isBusy = false }
-
         do {
             let backend = try accessBackend()
             let current = try await readTones(using: backend)
-            let silent = try silentTones()
+            let silent  = try silentTones()
             if current == silent {
-                mode = .silentTone
-                statusDetail = nil
-                needsAirliftSetup = false
-                lastError = nil
+                mode = .silentTone; statusDetail = nil; needsAirliftSetup = false; lastError = nil
                 return
             }
-
             try ensureBackup(current)
             do {
                 try await writeTones(silent, using: backend)
-                mode = .silentTone
-                statusDetail = nil
-                needsAirliftSetup = false
-                lastError = nil
+                mode = .silentTone; statusDetail = nil; needsAirliftSetup = false; lastError = nil
             } catch {
                 try? await writeTones(current, using: backend)
                 throw error
             }
-        } catch {
-            reportOperationError(error)
-        }
+        } catch { reportOperationError(error) }
     }
 
     func restoreSystemTone() async {
         guard !isBusy else { return }
         isBusy = true
         defer { isBusy = false }
-
         do {
             let backend = try accessBackend()
             let current = try await readTones(using: backend)
-            // No backup yet means the tones have never been changed, so they are
-            // already the original system tones.
             guard let backup = try? readBackups() else {
-                mode = .systemTone
-                statusDetail = nil
-                needsAirliftSetup = false
-                lastError = nil
+                mode = .systemTone; statusDetail = nil; needsAirliftSetup = false; lastError = nil
                 return
             }
             if current == backup {
-                mode = .systemTone
-                statusDetail = nil
-                needsAirliftSetup = false
-                lastError = nil
+                mode = .systemTone; statusDetail = nil; needsAirliftSetup = false; lastError = nil
                 return
             }
-
             do {
                 try await writeTones(backup, using: backend)
-                mode = .systemTone
-                statusDetail = nil
-                needsAirliftSetup = false
-                lastError = nil
+                mode = .systemTone; statusDetail = nil; needsAirliftSetup = false; lastError = nil
             } catch {
                 try? await writeTones(current, using: backend)
                 throw error
             }
-        } catch {
-            reportOperationError(error)
-        }
+        } catch { reportOperationError(error) }
     }
 
     private func reportOperationError(_ error: Error) {
@@ -194,35 +197,26 @@ final class CallRecordingToneService: ObservableObject {
         lastError = error.localizedDescription
     }
 
-    // BadQuery 优先：iOS 26+ 均可直接访问系统文件，无需 LocalDevVPN 或代理工具。
-    // 仅在 BadQuery 不可用时才降级到 Airlift（需要 LocalDevVPN）。
+    // BadQuery first: works on iOS 26+/27 without any VPN or proxy.
+    // Fall back to Airlift (loopback tunnel required) only when BadQuery is unavailable.
     private func accessBackend() throws -> AccessBackend {
         guard SystemCompatibility.isSupported else {
             throw CallRecordingToneError.unsupported
         }
-
-        if BadQuery.isAvailable {
-            return .badQuery
-        }
+        if BadQuery.isAvailable { return .badQuery }
 
         let pairingPath = PairingController.pairingFilePath()
-        let attributes = try? FileManager.default.attributesOfItem(atPath: pairingPath)
-        let size = attributes?[.size] as? Int ?? 0
-        guard size > 0 else {
-            throw CallRecordingToneError.pairingRequired
-        }
+        let size = (try? FileManager.default.attributesOfItem(atPath: pairingPath)[.size] as? Int) ?? 0
+        guard size > 0 else { throw CallRecordingToneError.pairingRequired }
         return .airlift(pairingPath: pairingPath)
     }
 
     private func shouldOfferAirliftSetup(for error: Error) -> Bool {
         guard let error = error as? CallRecordingToneError else { return false }
         switch error {
-        case .pairingRequired, .airliftUnavailable, .airliftFailed:
-            return true
-        case .toneReadFailed:
-            return !BadQuery.isAvailable
-        case .unsupported, .missingTone, .missingBackup, .invalidToneBundle, .verificationFailed:
-            return false
+        case .pairingRequired, .airliftUnavailable, .airliftFailed: return true
+        case .toneReadFailed: return !BadQuery.isAvailable
+        case .unsupported, .missingTone, .missingBackup, .invalidToneBundle, .verificationFailed: return false
         }
     }
 
@@ -234,33 +228,21 @@ final class CallRecordingToneService: ObservableObject {
     private func readTones(using backend: AccessBackend) async throws -> [Data] {
         var tones: [Data] = []
         tones.reserveCapacity(files.count)
-
         for file in files {
             do {
                 switch backend {
                 case .badQuery:
                     tones.append(try BadQuery.readData(at: file.systemPath))
                 case .airlift(let pairingPath):
-                    tones.append(
-                        try await AirliftToneTransport.shared.read(
-                            path: file.systemPath,
-                            pairingPath: pairingPath
-                        )
-                    )
+                    tones.append(try await AirliftToneTransport.shared.read(path: file.systemPath, pairingPath: pairingPath))
                 }
-            } catch {
-                throw mapReadError(error, file: file)
-            }
+            } catch { throw mapReadError(error, file: file) }
         }
-
         return tones
     }
 
     private func mapReadError(_ error: Error, file: ToneFile) -> Error {
-        if let error = error as? CallRecordingToneError {
-            return error
-        }
-
+        if let error = error as? CallRecordingToneError { return error }
         let nsError = error as NSError
         if nsError.domain == NSCocoaErrorDomain, nsError.code == NSFileReadNoSuchFileError {
             return CallRecordingToneError.missingTone(file.name)
@@ -270,9 +252,7 @@ final class CallRecordingToneService: ObservableObject {
 
     private func silentTones() throws -> [Data] {
         try files.map { file in
-            guard let url = resourceURL(for: file) else {
-                throw CallRecordingToneError.invalidToneBundle
-            }
+            guard let url = resourceURL(for: file) else { throw CallRecordingToneError.invalidToneBundle }
             return try Data(contentsOf: url)
         }
     }
@@ -280,41 +260,21 @@ final class CallRecordingToneService: ObservableObject {
     private func resourceURL(for file: ToneFile) -> URL? {
         let bundle = Bundle.main
         return bundle.url(forResource: file.resourceName, withExtension: file.resourceExtension)
-            ?? bundle.url(
-                forResource: file.resourceName,
-                withExtension: file.resourceExtension,
-                subdirectory: "Resources"
-            )
-            ?? bundle.url(
-                forResource: file.resourceName,
-                withExtension: file.resourceExtension,
-                subdirectory: "SilentTones"
-            )
+            ?? bundle.url(forResource: file.resourceName, withExtension: file.resourceExtension, subdirectory: "Resources")
+            ?? bundle.url(forResource: file.resourceName, withExtension: file.resourceExtension, subdirectory: "SilentTones")
     }
 
     private func ensureBackup(_ current: [Data]) throws {
-        if (try? readBackups()) != nil {
-            return
-        }
-        guard current != (try silentTones()) else {
-            throw CallRecordingToneError.missingBackup
-        }
-
-        try FileManager.default.createDirectory(
-            at: backupDirectory,
-            withIntermediateDirectories: true
-        )
-        for (file, data) in zip(files, current) {
-            try data.write(to: backupURL(for: file), options: .atomic)
-        }
+        if (try? readBackups()) != nil { return }
+        guard current != (try silentTones()) else { throw CallRecordingToneError.missingBackup }
+        try FileManager.default.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
+        for (file, data) in zip(files, current) { try data.write(to: backupURL(for: file), options: .atomic) }
     }
 
     private func readBackups() throws -> [Data] {
         try files.map { file in
             let url = backupURL(for: file)
-            guard FileManager.default.fileExists(atPath: url.path) else {
-                throw CallRecordingToneError.missingBackup
-            }
+            guard FileManager.default.fileExists(atPath: url.path) else { throw CallRecordingToneError.missingBackup }
             return try Data(contentsOf: url)
         }
     }
@@ -326,16 +286,11 @@ final class CallRecordingToneService: ObservableObject {
     private func writeTones(_ tones: [Data], using backend: AccessBackend) async throws {
         switch backend {
         case .badQuery:
-            for (file, data) in zip(files, tones) {
-                try BadQuery.writeData(data, to: file.systemPath)
-            }
+            for (file, data) in zip(files, tones) { try BadQuery.writeData(data, to: file.systemPath) }
         case .airlift(let pairingPath):
-            let payload = zip(files, tones).map {
-                AirliftToneFile(name: $0.name, data: $1)
-            }
+            let payload = zip(files, tones).map { AirliftToneFile(name: $0.name, data: $1) }
             try await AirliftToneTransport.shared.write(files: payload, pairingPath: pairingPath)
         }
-
         let verified = try await readTones(using: backend)
         for (index, file) in files.enumerated() {
             guard verified.indices.contains(index), verified[index] == tones[index] else {
