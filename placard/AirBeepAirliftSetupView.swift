@@ -95,7 +95,7 @@ struct AirBeepAirliftSetupView: View {
                     pairingPath: PairingController.pairingFilePath()
                 )
                 connected = true
-            } catch { connectionError = error.localizedDescription }
+            } catch { connectionError = CallRecordingToneError.localizeAirliftReason(error.localizedDescription) }
         }
     }
 }

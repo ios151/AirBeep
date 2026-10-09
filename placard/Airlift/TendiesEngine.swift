@@ -14,11 +14,22 @@ public final class TendiesEngine {
 
     private init() {}
 
+    // AirliftFFI 默认目标地址为 172.16.0.1（LocalDevVPN 旧地址），
+    // 代理工具使用 10.7.0.1，每次操作前统一设置。
+    private static let rtldDefault = UnsafeMutableRawPointer(bitPattern: -2)
+    private static func configureTargetHost() {
+        typealias Fn = @convention(c) (UnsafePointer<CChar>?) -> Int32
+        guard let sym = dlsym(rtldDefault, "al_set_target_host") else { return }
+        let fn = unsafeBitCast(sym, to: Fn.self)
+        _ = "10.7.0.1".withCString { fn($0) }
+    }
+
     // MARK: - Auto-detect PosterBoard Container
 
     public func detectPosterBoardContainer(pairingPath: String) async throws -> String {
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
+                Self.configureTargetHost()
                 var outContainer: UnsafeMutablePointer<CChar>? = nil
                 var outError: UnsafeMutablePointer<CChar>? = nil
 
