@@ -217,16 +217,19 @@ final class CallRecordingToneService: ObservableObject {
 
     // BadQuery 优先（iOS 26+/27），不需要任何 VPN 或代理。
     // BadQuery 不可用时才降级到 Airlift（需要回环隧道）。
+    // iOS 27+ containermanager 行为已变，BadQuery 查询失败，还原原版判断。
     private func accessBackend() throws -> AccessBackend {
         guard SystemCompatibility.isSupported else {
             throw CallRecordingToneError.unsupported
         }
-        if BadQuery.isAvailable { return .badQuery }
-
-        let pairingPath = PairingController.pairingFilePath()
-        let size = (try? FileManager.default.attributesOfItem(atPath: pairingPath)[.size] as? Int) ?? 0
-        guard size > 0 else { throw CallRecordingToneError.pairingRequired }
-        return .airlift(pairingPath: pairingPath)
+        let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        if major >= 27 || !BadQuery.isAvailable {
+            let pairingPath = PairingController.pairingFilePath()
+            let size = (try? FileManager.default.attributesOfItem(atPath: pairingPath)[.size] as? Int) ?? 0
+            guard size > 0 else { throw CallRecordingToneError.pairingRequired }
+            return .airlift(pairingPath: pairingPath)
+        }
+        return .badQuery
     }
 
     private func shouldOfferAirliftSetup(for error: Error) -> Bool {
